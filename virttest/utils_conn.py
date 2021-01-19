@@ -19,6 +19,7 @@ from virttest import data_dir
 from virttest import utils_package
 from virttest import libvirt_version
 from virttest import utils_split_daemons
+from virttest import utils_iptables
 
 
 class ConnectionError(Exception):
@@ -254,6 +255,38 @@ class ConnServerRestartError(ConnectionError):
     def __str__(self):
         return ("Failed to restart libvirtd service on server.\n"
                 "output: %s.\n" % (self.output))
+
+
+class ListenUNIXSocketError(ConnectionError):
+
+    """
+    Error in starting a proxy that listens on unix socket.
+    """
+
+    def __init__(self, cmd, output):
+        ConnectionError.__init__(self)
+        self.cmd = cmd
+        self.output = output
+
+    def __str__(self):
+        return ("Failed to start a proxy that listens on unix socket. "
+                "cmd: '%s',\n output: %s" % (self.cmd, self.output))
+
+
+class ConnUNIXSocketError(ConnectionError):
+
+    """
+    Error in starting a proxy that listens on tcp socket.
+    """
+
+    def __init__(self, cmd, output):
+        ConnectionError.__init__(self)
+        self.cmd = cmd
+        self.output = output
+
+    def __str__(self):
+        return ("Failed to start a proxy that connects to tcp socket. "
+                "cmd: '%s',\n output: %s" % (self.cmd, self.output))
 
 
 class ConnectionBase(propcan.PropCanBase):
@@ -1946,3 +1979,181 @@ class UNIXConnection(ConnectionBase):
                 raise ConnServerRestartError(detail)
 
         logging.debug("UNIX connection setup successfully.")
+
+
+class UNIXSocketConnection(ConnectionBase):
+    """
+    Connection of Unix Socket transport.
+
+    Some specific variables for UNIXSocketConnection class.
+
+    setup_on_local: Whether to setup connection from local
+    desturi_port: desturi port to listen on
+    migrateuri_port: migrateuri port to listen on
+    disks_uri_port: disks-uri port to listen on
+    desturi_sock_listen: desturi socket path to listen on
+    migrateuri_sock: migrateuri socket path to listen on or connect to
+    disks_uri_sock: disks-uri socket path to listen on or connect to
+    desturi_sock_conn: desturi socket path to connect to
+    remove_my_rpcworker_policy: wheather to remove my-rpcworker policy
+    remove_qemu_kvm_policy: wheather to remove qemu-kvm policy
+    pmsocat_path: pmsocat script path
+    remote_pmsocat_path: pmsocat script path on remote
+    """
+    __slots__ = ('setup_on_local', 'desturi_port', 'migrateuri_port',
+                 'disks_uri_port', 'desturi_sock_listen', 'migrateuri_sock',
+                 'disks_uri_sock', 'desturi_sock_conn',
+                 'remove_my_rpcworker_policy', 'remove_qemu_kvm_policy',
+                 'pmsocat_path', 'remote_pmsocat_path')
+
+    def __init__(self, *args, **dargs):
+        """
+        Initialization of TLSConnection.
+        """
+        init_dict = dict(*args, **dargs)
+        init_dict['setup_on_local'] = init_dict.get('setup_on_local', True)
+        init_dict['desturi_port'] = init_dict.get("desturi_port", "22222")
+        init_dict['migrateuri_port'] = init_dict.get("migrateuri_port", "33333")
+        init_dict['disks_uri_port'] = init_dict.get("disks_uri_port", "44444")
+        init_dict['desturi_sock_listen'] = init_dict.get("desturi_sock_listen",
+                                                         "/tmp/desturi-socket")
+        init_dict['desturi_sock_conn'] = init_dict.get(
+            "desturi_sock_conn", "/var/run/libvirt/libvirt-sock")
+        init_dict['migrateuri_sock'] = init_dict.get(
+            "migrateuri_sock", "/var/lib/libvirt/qemu/migrateuri-socket")
+        init_dict['disks_uri_sock'] = init_dict.get(
+            "disks_uri_sock", "/var/lib/libvirt/qemu/disks-uri-socket")
+        init_dict['remove_my_rpcworker_policy'] = init_dict.get(
+            'remove_my_rpcworker_policy', False)
+        init_dict['remove_qemu_kvm_policy'] = init_dict.get(
+            'remove_qemu_kvm_policy', False)
+        super(UNIXSocketConnection, self).__init__(init_dict)
+
+        self.pmsocat_path = os.path.join(data_dir.get_shared_dir(),
+                                         'scripts/pmsocat', 'pmsocat36.py')
+        self.remote_pmsocat_path = os.path.join('/tmp', 'pmsocat36.py')
+        remote_old.scp_to_remote(self.server_ip, '22', self.server_user,
+                                 self.server_pwd, self.pmsocat_path,
+                                 self.remote_pmsocat_path)
+
+    def clear_pmsocat(self, ignore_status=False):
+        """
+        Clear pmsocat processes.
+
+        :param ignore_status: Whether to raise an exception when command fails
+        """
+        for session in [self.client_session, self.server_session]:
+            cmd = "pkill -f pmsocat36"
+            status, output = session.cmd_status_output(cmd)
+            if not ignore_status:
+                if status:
+                    raise ConnCmdClientError(cmd, output)
+
+    def conn_recover(self):
+        """
+        Clean up for Unix socket connection.
+
+        (1). Remove firewall ports
+        (2). Stop pmsocat process
+        (3). Remove my-rpcworker policy
+        """
+        if self.setup_on_local:
+            tcp2unix_session = self.server_session
+            dest_pmsocat_path = self.remote_pmsocat_path
+            unix2tcp_session = self.client_session
+        else:
+            tcp2unix_session = self.client_session
+            dest_pmsocat_path = self.pmsocat_path
+            unix2tcp_session = self.server_session
+
+        firewall_cmd = utils_iptables.Firewall_cmd(tcp2unix_session)
+        for port_to_del in [self.desturi_port, self.migrateuri_port, self.disks_uri_port]:
+            firewall_cmd.remove_port(port_to_del, 'tcp')
+        self.clear_pmsocat(ignore_status=True)
+        tcp2unix_session.cmd("rm -rf %s" % dest_pmsocat_path)
+        if self.remove_my_rpcworker_policy:
+            logging.debug("Remove my-rpcworker policy.")
+            cmd = "semodule -X 300 -r my-rpcworker"
+            status, output = unix2tcp_session.cmd_status_output(cmd)
+            if status:
+                raise ConnCmdClientError(cmd, output)
+        if self.remove_qemu_kvm_policy:
+            logging.debug("Remove qemu-kvm policy.")
+            cmd = "semodule -r qemu-kvm"
+            status, output = unix2tcp_session.cmd_status_output(cmd)
+            if status:
+                raise ConnCmdClientError(cmd, output)
+        logging.debug("UNIX sockets recover successfully.")
+
+    def conn_setup(self):
+        """
+        Setup unix socket connection.
+
+        (1). Start a unix proxy that listens on tcp socket
+        (2). Active rpcworker policy
+        (3). Start a proxy that listens on tcp socket
+        (4). Add firewall ports
+        """
+        self.clear_pmsocat(ignore_status=True)
+        if self.setup_on_local:
+            unix2tcp_session = self.client_session
+            destination_ip = self.server_ip
+            src_pmsocat_path = self.pmsocat_path
+            dest_pmsocat_path = self.remote_pmsocat_path
+            tcp2unix_session = self.server_session
+        else:
+            unix2tcp_session = self.server_session
+            destination_ip = self.client_ip
+            src_pmsocat_path = self.remote_pmsocat_path
+            dest_pmsocat_path = self.pmsocat_path
+            tcp2unix_session = self.client_session
+
+        # Listen on UNIX socket and connect to network
+        for socks in [[self.desturi_sock_listen, self.desturi_port],
+                      [self.migrateuri_sock, self.migrateuri_port],
+                      [self.disks_uri_sock, self.disks_uri_port]]:
+            cmd = ("{} unix2tcp -c system_u:system_r:svirt_socket_t:s0 {} {} "
+                   "{} &".format(src_pmsocat_path, socks[0], destination_ip,
+                                 socks[1]))
+            status, output = unix2tcp_session.cmd_status_output(cmd)
+            if status:
+                raise ListenUNIXSocketError(cmd, output)
+
+        cmd = ("ausearch -c 'rpc-worker' --raw | audit2allow -M my-rpcworker |"
+               "grep my-rpcworker.pp")
+        status, output = unix2tcp_session.cmd_status_output(cmd)
+        if not status:
+            logging.debug("Active rpcworker policy.")
+            cmd = "semodule -X 300 -i my-rpcworker.pp"
+            status, output = unix2tcp_session.cmd_status_output(cmd)
+            if status:
+                raise ConnCmdClientError(cmd, output)
+            self.remove_my_rpcworker_policy = True
+        cmd = ("ausearch -c 'qemu-kvm' --raw | audit2allow -M qemu-kvm |"
+               "grep qemu-kvm.pp")
+        status, output = unix2tcp_session.cmd_status_output(cmd)
+        if not status:
+            logging.debug("Active qemu-kvm policy.")
+            cmd = "semodule -i qemu-kvm.pp"
+            status, output = unix2tcp_session.cmd_status_output(cmd)
+            if status:
+                raise ConnCmdClientError(cmd, output)
+            self.remove_qemu_kvm_policy = True
+        logging.debug("UNIX2TCP setup successfully.")
+
+        # Listen on network and connect to UNIX socket
+        for socks in [[self.desturi_port, self.desturi_sock_conn],
+                      [self.migrateuri_port, self.migrateuri_sock],
+                      [self.disks_uri_port, self.disks_uri_sock]]:
+            cmd = ("{} tcp2unix {} {} &"
+                   .format(dest_pmsocat_path, *socks))
+            status, output = tcp2unix_session.cmd_status_output(cmd)
+            if status:
+                raise ConnUNIXSocketError(cmd, output)
+
+        firewall_cmd = utils_iptables.Firewall_cmd(tcp2unix_session)
+        for port_to_add in [self.desturi_port, self.migrateuri_port, self.disks_uri_port]:
+            logging.debug("add port: %s", port_to_add)
+            firewall_cmd.add_port(port_to_add, 'tcp', firewalld_reload=False)
+
+        logging.debug("TCP2UNIX setup successfully.")
