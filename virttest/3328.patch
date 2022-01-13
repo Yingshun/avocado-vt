@@ -1,0 +1,82 @@
+From 490bcda7f1cb20d8f96680af935f704986c6c154 Mon Sep 17 00:00:00 2001
+From: Lukas Kotek <lkotek@redhat.com>
+Date: Thu, 13 Jan 2022 09:57:02 +0100
+Subject: [PATCH] Align avocado-vt with software_manager changes in avocado
+
+See: https://github.com/avocado-framework/avocado/pull/5225
+
+Signed-off-by: Lukas Kotek <lkotek@redhat.com>
+---
+ virttest/cpu.py                  | 4 ++--
+ virttest/staging/utils_cgroup.py | 6 +++---
+ virttest/utils_package.py        | 4 ++--
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/virttest/cpu.py b/virttest/cpu.py
+index a0a68fed7b..acee95f067 100644
+--- a/virttest/cpu.py
++++ b/virttest/cpu.py
+@@ -26,7 +26,7 @@
+ 
+ 
+ from avocado.utils import cpu as utils
+-from avocado.utils import software_manager
++from avocado.utils.software_manager import manager
+ from avocado.utils import process
+ from avocado.utils import path
+ from avocado.core import exceptions
+@@ -587,7 +587,7 @@ def is_qemu_kvm_ma():
+     """
+     Check if qemu-kvm-ma is installed in host
+     """
+-    sm = software_manager.SoftwareManager()
++    sm = manager.SoftwareManager()
+     return sm.check_installed("qemu-kvm-ma")
+ 
+ 
+diff --git a/virttest/staging/utils_cgroup.py b/virttest/staging/utils_cgroup.py
+index 65782db872..e7818506b8 100755
+--- a/virttest/staging/utils_cgroup.py
++++ b/virttest/staging/utils_cgroup.py
+@@ -17,7 +17,7 @@
+ from tempfile import mkdtemp
+ 
+ from avocado.core import exceptions
+-from avocado.utils import software_manager
++from avocado.utils.software_manager import manager
+ from avocado.utils import process
+ 
+ from . import service
+@@ -719,8 +719,8 @@ def __init__(self):
+         #
+         # Please refer to
+         # https://bugzilla.redhat.com/show_bug.cgi?format=multiple&id=882887
+-        manager = software_manager.SoftwareManager()
+-        if not manager.install('libcgroup-tools'):
++        mgr = manager.SoftwareManager()
++        if not mgr.install('libcgroup-tools'):
+             exceptions.TestError("Failed to install libcgroup-tools on host")
+         self._service_manager = service.Factory.create_service("cgconfig")
+ 
+diff --git a/virttest/utils_package.py b/virttest/utils_package.py
+index 41fd91ba82..17eecb9786 100644
+--- a/virttest/utils_package.py
++++ b/virttest/utils_package.py
+@@ -5,7 +5,7 @@
+ import aexpect
+ 
+ from avocado.core import exceptions
+-from avocado.utils import software_manager
++from avocado.utils.software_manager import manager
+ from six import string_types
+ 
+ from virttest import utils_misc
+@@ -144,7 +144,7 @@ def remove(self, timeout=PKG_MGR_TIMEOUT):
+         return self.operate(timeout, True)
+ 
+ 
+-class LocalPackageMgr(software_manager.SoftwareManager):
++class LocalPackageMgr(manager.SoftwareManager):
+ 
+     """
+     Local package manage class
