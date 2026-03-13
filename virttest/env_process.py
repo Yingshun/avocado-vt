@@ -1332,6 +1332,12 @@ def postprocess(test, params, env):
         test_name = params.get("shortname", getattr(test, "name", "unknown_test"))
         if hasattr(test_name, "uid"):
             test_name = str(test_name.uid)
+        # Save to test-results/gcov_libvirt/ to avoid long path issues
+        # test.debugdir is typically: .../test-results/{test-dir}/
+        # Navigate up to test-results/ and create gcov_qemu/ there
+        test_results_dir = os.path.dirname(test.debugdir)
+        gcov_qemu_dir = os.path.join(test_results_dir, "gcov_qemu")
+        os.makedirs(gcov_qemu_dir, exist_ok=True)
 
         if gcov_format == "lcov":
             try:
@@ -1339,23 +1345,21 @@ def postprocess(test, params, env):
             except path.CmdNotFoundError:
                 LOG.warning("lcov package not installed, cannot collect QEMU coverage")
             else:
-                gcov_qemu_dir = utils_misc.get_path(test.debugdir, "gcov_qemu")
                 collect_lcov_coverage(qemu_builddir, gcov_qemu_dir, test_name, "qemu")
 
                 if params.get("gcov_qemu_compress", "no") == "yes":
-                    os.chdir(test.debugdir)
+                    os.chdir(gcov_qemu_dir)
                     archive.compress("gcov_qemu.tar.gz", gcov_qemu_dir)
                     shutil.rmtree(gcov_qemu_dir, ignore_errors=True)
         else:
             if utils_package.package_install("gcovr"):
-                gcov_qemu_dir = utils_misc.get_path(test.debugdir, "gcov_qemu")
                 collect_cmd_opts = params.get("gcov_qemu_collect_cmd_opts", "--html")
                 collect_gcovr_coverage(
                     qemu_builddir, gcov_qemu_dir, "qemu", collect_cmd_opts
                 )
 
                 if params.get("gcov_qemu_compress", "no") == "yes":
-                    os.chdir(test.debugdir)
+                    os.chdir(gcov_qemu_dir)
                     archive.compress("gcov_qemu.tar.gz", gcov_qemu_dir)
                     shutil.rmtree(gcov_qemu_dir, ignore_errors=True)
             else:
@@ -1369,6 +1373,13 @@ def postprocess(test, params, env):
         if hasattr(test_name, "uid"):
             test_name = str(test_name.uid)
 
+        # Save to test-results/gcov_libvirt/ to avoid long path issues
+        # test.debugdir is typically: .../test-results/{test-dir}/
+        # Navigate up to test-results/ and create gcov_libvirt/ there
+        test_results_dir = os.path.dirname(test.debugdir)
+        gcov_libvirt_dir = os.path.join(test_results_dir, "gcov_libvirt")
+        os.makedirs(gcov_libvirt_dir, exist_ok=True)
+
         if gcov_format == "lcov":
             try:
                 path.find_command("lcov")
@@ -1377,25 +1388,23 @@ def postprocess(test, params, env):
                     "lcov package not installed, cannot collect libvirt coverage"
                 )
             else:
-                gcov_libvirt_dir = utils_misc.get_path(test.debugdir, "gcov_libvirt")
                 collect_lcov_coverage(
                     libvirt_builddir, gcov_libvirt_dir, test_name, "libvirt"
                 )
 
                 if params.get("gcov_libvirt_compress", "no") == "yes":
-                    os.chdir(test.debugdir)
+                    os.chdir(gcov_libvirt_dir)
                     archive.compress("gcov_libvirt.tar.gz", gcov_libvirt_dir)
                     shutil.rmtree(gcov_libvirt_dir, ignore_errors=True)
         else:
             if utils_package.package_install("gcovr"):
-                gcov_libvirt_dir = utils_misc.get_path(test.debugdir, "gcov_libvirt")
                 collect_cmd_opts = params.get("gcov_libvirt_collect_cmd_opts", "--html")
                 collect_gcovr_coverage(
                     libvirt_builddir, gcov_libvirt_dir, "libvirt", collect_cmd_opts
                 )
 
                 if params.get("gcov_libvirt_compress", "no") == "yes":
-                    os.chdir(test.debugdir)
+                    os.chdir(gcov_libvirt_dir)
                     archive.compress("gcov_libvirt.tar.gz", gcov_libvirt_dir)
                     shutil.rmtree(gcov_libvirt_dir, ignore_errors=True)
             else:
