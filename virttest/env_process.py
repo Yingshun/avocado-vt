@@ -1329,7 +1329,7 @@ def postprocess(test, params, env):
             "gcov_qemu_builddir", os.path.join(test.bindir, "build", "qemu")
         )
         gcov_format = params.get("gcov_qemu_format", "html")
-        test_name = params.get("shortname", getattr(test, "name", "unknown_test"))
+        test_name = params.get("name", "unknown_test")
         if hasattr(test_name, "uid"):
             test_name = str(test_name.uid)
         # Save to test-results/gcov_libvirt/ to avoid long path issues
@@ -1381,7 +1381,7 @@ def postprocess(test, params, env):
     if params.get("gcov_libvirt", "no") == "yes":
         libvirt_builddir = params.get("gcov_libvirt_builddir", "/var/tmp/libvirt")
         gcov_format = params.get("gcov_libvirt_format", "html")
-        test_name = params.get("shortname", getattr(test, "name", "unknown_test"))
+        test_name = params.get("name", "unknown_test")
         if hasattr(test_name, "uid"):
             test_name = str(test_name.uid)
 
